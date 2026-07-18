@@ -1,0 +1,16 @@
+{
+  "name": "slack-user-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "slack-user": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
