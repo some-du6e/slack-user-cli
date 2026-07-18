@@ -1,0 +1,7 @@
+.env
+*.log
+node_modules/
+*cookies*.json
+cookies.json
+pasted-text.txt
+
