@@ -78,8 +78,9 @@ node src/organize.js /path/to/cookies.json
 # Apply the reviewed policy.
 node src/organize.js /path/to/cookies.json --apply
 
-# Enforce the approved category order.
+# Preview, then enforce the approved category order.
 node src/reorder.js /path/to/cookies.json
+node src/reorder.js /path/to/cookies.json --apply
 ```
 
 The organizer uses channel/category metadata only. It does not read messages,

@@ -50,6 +50,12 @@ function preview(method, params) {
   console.log("Re-run with --apply to execute.");
 }
 
+function previewSteps(steps) {
+  console.log("DRY RUN — no Slack changes made");
+  console.log(JSON.stringify({ steps }, null, 2));
+  console.log("Re-run with --apply to execute.");
+}
+
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const args = [...argv];
   if (!args.length || args.includes("--help") || args.includes("-h")) {
@@ -76,11 +82,19 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   let session = null;
   if (cookieFile) {
     const sessions = await loadSlackSessions(cookieFile, workspace);
-    const selectedIndex = sessionOption === undefined
-      ? (group === "categories" ? sessions.findIndex(s => String(s.auth.team_id).startsWith("E")) : 0)
-      : Number(sessionOption);
-    session = sessions[selectedIndex < 0 ? 0 : selectedIndex];
-    if (!session) throw new Error(`Session index ${selectedIndex} does not exist (found ${sessions.length})`);
+    if (sessionOption !== undefined) {
+      const selectedIndex = Number(sessionOption);
+      session = sessions[selectedIndex];
+      if (!session) throw new Error(`Session index ${selectedIndex} does not exist (found ${sessions.length})`);
+    } else {
+      const requiredPrefix = group === "categories" ? "E" : group === "channels" ? "T" : null;
+      session = requiredPrefix
+        ? sessions.find(candidate => String(candidate.auth.team_id).startsWith(requiredPrefix))
+        : sessions[0];
+      if (!session) throw new Error(requiredPrefix
+        ? `No ${requiredPrefix}-prefixed Slack session is available for ${group} commands`
+        : "No authenticated Slack session is available");
+    }
   }
   const client = new SlackClient({
     token: session?.token ?? env.SLACK_TOKEN,
@@ -111,7 +125,14 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     const channels = (takeOption(values, "--channels") ?? "").split(",").filter(Boolean);
     const [name] = values;
     if (!name || values.length !== 1) throw new Error("create requires one quoted category name");
-    if (!apply) return preview("users.channelSections.create", { name, emoji, channel_ids: channels.join(",") || undefined });
+    if (!apply) {
+      const steps = [{ method: "users.channelSections.create", params: { name, emoji } }];
+      if (channels.length) steps.push({
+        method: "users.channelSections.channels.bulkUpdate",
+        params: { remove: [], insert: [{ channel_section_id: "$created.channel_section_id", channel_ids: channels }] }
+      });
+      return previewSteps(steps);
+    }
     console.log(JSON.stringify(await client.createCategory(name, emoji, channels), null, 2));
   } else if (group === "categories" && action === "icon") {
     const [identifier, emoji] = rest;
@@ -138,8 +159,10 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
       ?? sections.find(s => s.name.toLowerCase() === identifier.toLowerCase());
     if (!section) throw new Error(`Category not found: ${identifier}`);
     const sectionId = section.channel_section_id;
-    const params = { remove: [], insert: [{ channel_section_id: sectionId, channel_ids: channelIds }] };
-    if (!apply) return preview("users.channelSections.channels.bulkUpdate", params);
+    if (!apply) {
+      const plan = await client.planAssignment(sectionId, channelIds);
+      return preview("users.channelSections.channels.bulkUpdate", { remove: plan.remove, insert: plan.insert });
+    }
     console.log(JSON.stringify(await client.assignChannels(sectionId, channelIds), null, 2));
   } else if (group === "emoji" && action === "search") {
     const [query] = rest;

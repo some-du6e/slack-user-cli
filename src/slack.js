@@ -67,29 +67,29 @@ export class SlackClient {
   }
 
   async setCategoryIcon(sectionId, emoji) {
-    const listed = await this.listCategories();
-    const section = (listed.channel_sections ?? []).find(item => item.channel_section_id === sectionId);
-    if (!section) throw new Error(`Category not found: ${sectionId}`);
-    return this.call("users.channelSections.set", {
-      team_id: this.teamId,
-      channel_section_id: section.channel_section_id,
-      name: section.name,
-      emoji,
-      next_channel_section_id: section.next_channel_section_id ?? ""
-    });
+    return this.setCategory(sectionId, { emoji });
   }
 
   async setCategory(sectionId, fields) {
     const listed = await this.listCategories();
     const section = (listed.channel_sections ?? []).find(item => item.channel_section_id === sectionId);
     if (!section) throw new Error(`Category not found: ${sectionId}`);
-    return this.call("users.channelSections.set", {
+    const expected = {
+      name: fields.name ?? section.name,
+      emoji: fields.emoji ?? section.emoji ?? ""
+    };
+    const written = await this.call("users.channelSections.set", {
       team_id: this.teamId,
       channel_section_id: section.channel_section_id,
-      name: fields.name ?? section.name,
-      emoji: fields.emoji ?? section.emoji ?? "",
+      name: expected.name,
+      emoji: expected.emoji,
       next_channel_section_id: fields.nextChannelSectionId ?? section.next_channel_section_id ?? ""
     });
+    const verified = (await this.listCategories()).channel_sections?.find(item => item.channel_section_id === sectionId);
+    if (!verified || verified.name !== expected.name || (verified.emoji ?? "") !== expected.emoji) {
+      throw new Error(`Category update could not be verified: ${sectionId}`);
+    }
+    return { ...written, category: verified };
   }
 
   async searchEmoji(query) {
@@ -101,22 +101,28 @@ export class SlackClient {
   async createCategory(name, emoji = "bookmark_tabs", channelIds = []) {
     const created = await this.call("users.channelSections.create", { team_id: this.teamId, name, emoji });
     if (channelIds.length) await this.assignChannels(created.channel_section_id, channelIds);
-    return created;
+    const verified = (await this.listCategories()).channel_sections?.find(item => item.channel_section_id === created.channel_section_id);
+    if (!verified || verified.name !== name || (verified.emoji ?? "") !== emoji) {
+      throw new Error(`Category creation could not be verified: ${created.channel_section_id}`);
+    }
+    return { ...created, category: verified };
   }
 
-  deleteCategory(sectionId) {
-    return this.call("users.channelSections.delete", { team_id: this.teamId, channel_section_id: sectionId });
+  async deleteCategory(sectionId) {
+    const deleted = await this.call("users.channelSections.delete", { team_id: this.teamId, channel_section_id: sectionId });
+    const stillPresent = (await this.listCategories()).channel_sections?.some(item => item.channel_section_id === sectionId);
+    if (stillPresent) throw new Error(`Category deletion could not be verified: ${sectionId}`);
+    return deleted;
   }
 
-  async assignChannels(sectionId, channelIds) {
+  async planAssignment(sectionId, channelIds) {
     const listed = await this.listCategories();
     const sections = listed.channel_sections ?? [];
     const target = sections.find(section => section.channel_section_id === sectionId);
     if (!target) throw new Error(`Category not found: ${sectionId}`);
+    const wanted = new Set(channelIds);
     const alreadyAssigned = new Set(target.channel_ids_page?.channel_ids ?? []);
-    const toInsert = channelIds.filter(id => !alreadyAssigned.has(id));
-    if (!toInsert.length) return { ok: true, unchanged: true };
-    const wanted = new Set(toInsert);
+    const toInsert = [...wanted].filter(id => !alreadyAssigned.has(id));
     const remove = sections
       .filter(section => section.channel_section_id !== sectionId)
       .map(section => ({
@@ -124,10 +130,20 @@ export class SlackClient {
         channel_ids: (section.channel_ids_page?.channel_ids ?? []).filter(id => wanted.has(id))
       }))
       .filter(change => change.channel_ids.length);
-    return this.call("users.channelSections.channels.bulkUpdate", {
+    return {
       team_id: this.teamId,
-      remove: JSON.stringify(remove),
-      insert: JSON.stringify([{ channel_section_id: sectionId, channel_ids: toInsert }])
+      remove,
+      insert: toInsert.length ? [{ channel_section_id: sectionId, channel_ids: toInsert }] : []
+    };
+  }
+
+  async assignChannels(sectionId, channelIds) {
+    const plan = await this.planAssignment(sectionId, channelIds);
+    if (!plan.remove.length && !plan.insert.length) return { ok: true, unchanged: true };
+    return this.call("users.channelSections.channels.bulkUpdate", {
+      team_id: plan.team_id,
+      remove: JSON.stringify(plan.remove),
+      insert: JSON.stringify(plan.insert)
     });
   }
 }

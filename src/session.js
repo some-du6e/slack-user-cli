@@ -4,11 +4,18 @@ function cookieHeader(cookies) {
   return cookies.map(cookie => `${cookie.name}=${cookie.value}`).join("; ");
 }
 
+function isSlackCookie(cookie) {
+  const domain = String(cookie.domain ?? "").toLowerCase().replace(/^\./, "");
+  return domain === "slack.com" || domain.endsWith(".slack.com");
+}
+
 export async function loadSlackSessions(cookieFile, workspace, fetchImpl = fetch) {
   const parsed = JSON.parse(await fs.readFile(cookieFile, "utf8"));
   const cookies = Array.isArray(parsed) ? parsed : parsed.cookies;
   if (!Array.isArray(cookies)) throw new Error("Cookie file must be a JSON cookie array or { cookies: [...] }");
-  const cookie = cookieHeader(cookies);
+  const slackCookies = cookies.filter(isSlackCookie);
+  if (!slackCookies.length) throw new Error("Cookie file contains no Slack cookies");
+  const cookie = cookieHeader(slackCookies);
   const target = workspace
     ? `https://${workspace.replace(/\.slack\.com$/, "")}.slack.com/ssb/redirect`
     : "https://app.slack.com/client";

@@ -75,19 +75,21 @@ for (const name of desiredOrder) {
   if (!section) {
     if (!APPLY) {
       section = { channel_section_id: `DRY-${name}`, name, emoji: categoryIcons[name], type: "standard", channel_ids_page: { channel_ids: [] } };
+      sections.push(section);
     } else {
       const created = await categoryClient.createCategory(name, categoryIcons[name]);
       sectionResponse = await categoryClient.listCategories();
       sections = sectionResponse.channel_sections ?? [];
       section = sections.find(s => s.channel_section_id === created.channel_section_id);
     }
-    sections.push?.(section);
   }
   if (APPLY && section.emoji !== categoryIcons[name]) await categoryClient.setCategoryIcon(section.channel_section_id, categoryIcons[name]);
 }
 
-sectionResponse = await categoryClient.listCategories();
-sections = sectionResponse.channel_sections ?? [];
+if (APPLY) {
+  sectionResponse = await categoryClient.listCategories();
+  sections = sectionResponse.channel_sections ?? [];
+}
 const currentCategory = new Map();
 for (const section of sections) for (const id of section.channel_ids_page?.channel_ids ?? []) currentCategory.set(id, section.name);
 
