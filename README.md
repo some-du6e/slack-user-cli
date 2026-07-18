@@ -1,98 +1,196 @@
+<div align="center">
+
 # slack-user-cli
 
-A deliberately small CLI for listing Slack channels and managing your personal sidebar custom sections (called “categories” here).
+**Your Slack sidebar, minus the archaeological dig.**
 
-Channel listing uses Slack's supported Web API. Custom sections use undocumented Slack endpoints, because Slack does not publish an official API for personal sidebar sections. Those commands can break when Slack changes its web client.
+List joined channels, inspect personal sidebar sections, and safely organize
+categories from a tiny dependency-free CLI.
 
-## Setup
+[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Zero dependencies](https://img.shields.io/badge/dependencies-0-4A154B)](./package.json)
+[![Tests](https://img.shields.io/badge/tests-9%20passing-2ea44f)](./test/slack.test.js)
+[![Private Slack API](https://img.shields.io/badge/sidebar%20API-undocumented-orange)](#important-caveat)
 
-Requires Node 20 or newer. No install step or third-party packages are needed.
+</div>
+
+> [!WARNING]
+> Slack does not publish an official API for personal sidebar sections. Channel
+> listing uses the supported Web API; category commands use Slack's private web
+> client endpoints and may need repairs after Slack updates.
+
+## What it does
+
+- Lists the public and private channels your account has joined.
+- Lists personal sidebar categories and their channel memberships.
+- Creates, icons, assigns, reorders, and deletes categories.
+- Previews every mutation before it touches Slack.
+- Loads browser-exported Slack cookies without persisting extracted tokens.
+- Handles Enterprise Grid's separate workspace and enterprise sessions.
+- Uses no runtime dependencies—just Node.js 20 or newer.
+
+## Quick start
+
+```sh
+git clone https://github.com/some-du6e/slack-user-cli.git
+cd slack-user-cli
+npm link
+```
+
+Authenticate with environment variables:
 
 ```sh
 export SLACK_TOKEN='your-user-or-session-token'
-# Some session tokens also require the matching cookie:
-export SLACK_COOKIE='your-cookie-header-value'
+export SLACK_COOKIE='optional-matching-cookie-header'
 
-npm test
-node src/cli.js auth test
-node src/cli.js channels list
-node src/cli.js categories list
+slack-user auth test
+slack-user channels list
+slack-user categories list
 ```
 
-Or authenticate directly from a browser cookie export. The workspace token is
-extracted in memory and is never printed or stored:
+Or use a browser cookie export. The workspace token is extracted in memory and
+is never printed or written to disk:
 
 ```sh
-node src/cli.js auth test --cookies /path/to/cookies.json --workspace hackclub
-node src/cli.js channels list --cookies /path/to/cookies.json --workspace hackclub
+slack-user auth test \
+  --cookies /path/to/cookies.json \
+  --workspace hackclub
+
+slack-user channels list \
+  --cookies /path/to/cookies.json \
+  --workspace hackclub \
+  --json
 ```
 
-Do not put credentials in `.env`, shell history, screenshots, commits, or chat. The CLI only reads them from the process environment and `.env` is gitignored as a backstop.
+> [!CAUTION]
+> Cookie exports are credentials. Keep them out of shell history, screenshots,
+> chat, logs, and Git. Revoke the Slack session after temporary automation.
 
 ## Commands
 
-```text
-auth test                         Verify the selected Slack session
-auth sessions                     List safe metadata for cookie-derived sessions
-channels list                     List channels the user belongs to
-categories list                   List sidebar categories and memberships
-categories create NAME            Create a category
-categories icon SECTION EMOJI     Change an existing category icon
-categories assign SECTION IDS...  Move channels into a category
-categories delete SECTION         Delete a category
-emoji search QUERY                Find matching workspace emoji names
-```
+| Command | What it does |
+| --- | --- |
+| `auth test` | Verify the selected Slack session. |
+| `auth sessions` | Show safe metadata for cookie-derived sessions. |
+| `channels list` | List channels the user belongs to. |
+| `categories list` | List sidebar categories and memberships. |
+| `categories create NAME` | Create a category. |
+| `categories icon SECTION EMOJI` | Change a category icon. |
+| `categories assign SECTION IDS...` | Move channels into a category. |
+| `categories delete SECTION` | Delete a category. |
+| `emoji search QUERY` | Find matching workspace emoji names. |
 
-Use `--json` for stable structured output and `--raw` when the complete Slack
-response is needed for debugging. Raw output can contain private workspace
-metadata, so inspect it locally and do not commit it.
+Useful options:
 
-## Category changes
+| Option | Meaning |
+| --- | --- |
+| `--cookies FILE` | Authenticate from a browser cookie-export JSON file. |
+| `--workspace NAME` | Select a workspace subdomain such as `hackclub`. |
+| `--session N` | Override automatic workspace/enterprise session selection. |
+| `--json` | Emit stable, simplified JSON. |
+| `--raw` | Emit Slack's complete response for local debugging. |
+| `--apply` | Execute a mutation; without it, mutations are previews. |
 
-Every mutation is a dry run unless `--apply` is present:
+## Safe category changes
+
+Mutations are dry runs by default:
 
 ```sh
-node src/cli.js categories create "Projects" --emoji ':hammer_and_wrench:'
-node src/cli.js categories create "Projects" --emoji ':hammer_and_wrench:' --apply
-node src/cli.js categories icon SEC123 hammer_and_wrench --apply
-node src/cli.js categories assign SEC123 C123 C456 --apply
-node src/cli.js categories delete SEC123 --apply
+# Preview
+slack-user categories create Projects \
+  --emoji hammer_and_wrench \
+  --channels C123,C456
+
+# Apply the exact reviewed plan
+slack-user categories create Projects \
+  --emoji hammer_and_wrench \
+  --channels C123,C456 \
+  --apply
 ```
 
-`assign` moves the named channels into the section. Always run `categories list --json` and save the non-secret output before applying a change.
+More examples:
 
-On Enterprise Grid cookie sessions, category commands automatically select the
-enterprise session while channel commands use the workspace session. Use
-`auth sessions` and `--session N` only when you need to override that choice.
+```sh
+slack-user emoji search project --json
+slack-user categories icon Projects hammer_and_wrench --apply
+slack-user categories assign Projects C123 C456 --apply
+slack-user categories delete Projects --apply
+```
+
+`categories assign` removes requested channels from their previous custom
+sections before inserting them into the destination. It also avoids duplicate
+insertions when rerun.
+
+## Enterprise Grid
+
+Cookie exports can yield two authenticated contexts:
+
+```text
+T… workspace session   → channel commands
+E… enterprise session  → personal category commands
+```
+
+The CLI selects the required context automatically and fails clearly when it is
+missing. Inspect available contexts with:
+
+```sh
+slack-user auth sessions --cookies /path/to/cookies.json --workspace hackclub
+```
 
 ## Hack Club organizer
 
-`src/organize.js` and `src/reorder.js` contain the user-specific Hack Club
-classification and ordering policy. They are intentionally separate from the
-general CLI.
+The repository includes an opinionated, user-specific Hack Club classifier. It
+is deliberately separate from the general CLI.
 
 ```sh
-# Preview category counts; does not mutate Slack.
+# Preview classification counts
 node src/organize.js /path/to/cookies.json
 
-# Apply the reviewed policy.
+# Apply the reviewed classification
 node src/organize.js /path/to/cookies.json --apply
 
-# Preview, then enforce the approved category order.
+# Preview and apply sidebar ordering
 node src/reorder.js /path/to/cookies.json
 node src/reorder.js /path/to/cookies.json --apply
 ```
 
-The organizer uses channel/category metadata only. It does not read messages,
-DM content, files, or Slack search history.
+The organizer uses channel names, topics, purposes, IDs, and existing category
+metadata. It does **not** read messages, DMs, files, search results, or history.
 
-## Limitations
+## Development
 
-- Personal sidebar categories rely on undocumented Slack Web API methods and
-  can break when Slack changes its client.
-- Cookie-export authentication is session-based; revoke the Slack session after
-  temporary automation and never reuse an exposed export.
-- Category response counts can lag after bulk updates. Verify the unique
-  `channel_ids_page.channel_ids` membership rather than trusting `count` alone.
-- The Hack Club organizer is intentionally workspace-specific and should not be
-  used as a generic classifier without replacing its policy.
+```sh
+npm test
+node --check src/cli.js
+node src/cli.js --help
+```
+
+Repository map:
+
+```text
+src/cli.js        command parsing, previews, and output
+src/slack.js      Slack HTTP client and private category contracts
+src/session.js    cookie filtering and in-memory session bootstrap
+src/organize.js   Hack Club-specific classification policy
+src/reorder.js    Hack Club-specific sidebar ordering
+test/             mocked API-contract tests
+```
+
+Read [AGENTS.md](./AGENTS.md) before making automated changes.
+
+## Important caveat
+
+- Personal category methods are undocumented and can change without notice.
+- Raw API output can contain private workspace metadata; inspect it locally.
+- Category `count` values can lag after bulk updates. Unique
+  `channel_ids_page.channel_ids` membership is the reliable read-back signal.
+- The bundled organizer is workspace-specific; replace its policy before using
+  it elsewhere.
+
+---
+
+<div align="center">
+
+Built for people whose Slack sidebar has become a cry for help.
+
+</div>
